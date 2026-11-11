@@ -4,7 +4,7 @@ A mobile-first web app for collecting the **Oral Health Practice Questionnaire (
 **clinical oral examination (Annexure II)** in the field, with an admin area to view and export the data.
 
 - **Form** – `/` – free to use, no login. Bilingual (English + বাংলা), one question per screen, large text and buttons.
-- **Admin** – `/admin` – single admin login, list / search / filter, record detail, delete, **CSV export**.
+- **Admin** – `/admin` – single admin login, list / search / filter, record detail, **bulk actions**, **CSV export**.
 - **Built for weak connections** – works fully offline after the first visit, autosaves every answer, and
   uploads finished forms automatically when the internet comes back.
 
@@ -54,6 +54,20 @@ Details for collectors:
 
 > Note: browser storage is per device and per browser. Forms waiting to upload are lost if the browser's site
 > data is cleared before they upload, so let the "waiting" count reach zero before clearing data or switching phones.
+
+### Admin bulk actions
+
+Every row in the admin list has a checkbox (the table header checkbox selects the whole page). Quick-select
+buttons above the list: **First 10 / First 20 / First 30** (newest first, across pages), **This page**,
+**All** (everything matching the current filter, up to 10,000) and **None**.
+
+When records are selected, an action bar appears at the bottom of the screen:
+
+- **Delete** – asks for confirmation, then permanently deletes all selected records.
+- **Print** – placeholder for now (shows a "coming soon" message).
+
+The selection is kept while moving between pages and after a reload, and is cleared when the search or consent
+filter changes – so records hidden by a filter can never be deleted by accident.
 
 ### Data stored in MongoDB
 
@@ -157,7 +171,7 @@ src/
     admin/login/                 admin login page
     admin/(protected)/           dashboard + record detail (session required)
     api/submissions/             public upload endpoint (validated, idempotent)
-    api/admin/                   login, logout, delete, CSV export
+    api/admin/                   login, logout, delete, bulk actions, CSV export
     manifest.ts                  PWA manifest
   components/form/               form UI (one-question screens, review, device panel)
   components/admin/              admin UI pieces

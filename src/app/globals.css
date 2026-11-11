@@ -60,6 +60,10 @@ body {
     @apply inline-flex h-12 items-center justify-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 text-[16px] font-semibold text-slate-800 transition-colors hover:bg-slate-50 focus-visible:ring-4 focus-visible:ring-teal-200 focus-visible:outline-none active:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-red-700 px-4 text-[16px] font-semibold text-white shadow-sm transition-colors hover:bg-red-800 focus-visible:ring-4 focus-visible:ring-red-200 focus-visible:outline-none active:bg-red-900 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
   /* <dialog> styled as a bottom sheet on phones, centred card on larger screens */
   .sheet {
     @apply fixed inset-x-0 top-auto bottom-0 m-0 w-full max-w-none rounded-t-3xl bg-white p-0 pb-[env(safe-area-inset-bottom)] text-slate-900 shadow-2xl sm:inset-x-auto sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-3xl;

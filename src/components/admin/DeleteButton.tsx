@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { TrashIcon } from "../icons";
+import { forgetSelected } from "./selection-store";
 
 export function DeleteButton({ id, participantId }: { id: string; participantId: string }) {
   const [busy, setBusy] = useState(false);
@@ -16,6 +17,7 @@ export function DeleteButton({ id, participantId }: { id: string; participantId:
     try {
       const res = await fetch(`/api/admin/submissions/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (res.ok) {
+        forgetSelected([id]);
         router.replace("/admin");
         router.refresh();
         return;

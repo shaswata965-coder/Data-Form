@@ -6,12 +6,13 @@ import {
   formatDateTime,
   getStats,
   listSubmissions,
+  MAX_BULK,
   normalizeParams,
   PAGE_SIZE,
 } from "@/lib/server/admin-data";
 import { ConfigError } from "@/lib/server/mongodb";
 import { AlertIcon } from "@/components/icons";
-import { ConsentBadge } from "@/components/admin/ConsentBadge";
+import { SubmissionsTable, type TableRow } from "@/components/admin/SubmissionsTable";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -50,6 +51,15 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
   const filterQs = { q: params.q, consent: params.consent };
   const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const to = Math.min(page * PAGE_SIZE, total);
+  const tableRows: TableRow[] = rows.map((r) => ({
+    id: String(r._id),
+    participantId: r.participantId,
+    consent: r.consent,
+    age: r.answers?.age,
+    gender: r.answers?.gender,
+    received: formatDateTime(r.receivedAt),
+    duplicate: duplicates.has(r.participantId),
+  }));
 
   return (
     <div className="mt-4 space-y-5">
@@ -95,99 +105,31 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
         )}
       </p>
 
-      {rows.length > 0 && (
-        <>
-          {/* Phones: cards */}
-          <ul className="space-y-2 md:hidden">
-            {rows.map((r) => (
-              <li key={String(r._id)}>
-                <Link
-                  href={`/admin/submissions/${r._id}`}
-                  className="block rounded-xl border border-slate-200 bg-white p-3 active:bg-slate-50"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate font-semibold text-slate-900">{r.participantId}</span>
-                    <ConsentBadge consent={r.consent} />
-                  </div>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {[ageGender(r.answers?.age, r.answers?.gender), formatDateTime(r.receivedAt)].filter(Boolean).join(" · ")}
-                  </p>
-                  {duplicates.has(r.participantId) && <DuplicateBadge />}
-                </Link>
-              </li>
-            ))}
-          </ul>
-
-          {/* Larger screens: table */}
-          <div className="hidden overflow-x-auto rounded-2xl border border-slate-200 bg-white md:block">
-            <table className="w-full text-left text-[15px]">
-              <thead className="border-b border-slate-200 bg-slate-50 text-sm text-slate-600">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Received</th>
-                  <th className="px-4 py-3 font-semibold">Participant ID</th>
-                  <th className="px-4 py-3 font-semibold">Age</th>
-                  <th className="px-4 py-3 font-semibold">Gender</th>
-                  <th className="px-4 py-3 font-semibold">Consent</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rows.map((r) => (
-                  <tr key={String(r._id)} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 whitespace-nowrap text-slate-600">{formatDateTime(r.receivedAt)}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-900">
-                      {r.participantId}
-                      {duplicates.has(r.participantId) && <DuplicateBadge />}
-                    </td>
-                    <td className="px-4 py-3">{r.answers?.age ?? "—"}</td>
-                    <td className="px-4 py-3">{genderLabel(r.answers?.gender) ?? "—"}</td>
-                    <td className="px-4 py-3">
-                      <ConsentBadge consent={r.consent} />
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Link href={`/admin/submissions/${r._id}`} className="font-semibold text-teal-800 underline">
-                        View
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-
-      {pages > 1 && (
-        <nav className="flex items-center justify-between gap-3" aria-label="Pagination">
-          {page > 1 ? (
-            <Link className="btn-secondary" href={`/admin${qs({ ...filterQs, page: page - 1 })}`}>
-              ← Newer
-            </Link>
-          ) : (
-            <span />
-          )}
-          <span className="text-sm text-slate-600">
-            Page {page} of {pages}
-          </span>
-          {page < pages ? (
-            <Link className="btn-secondary" href={`/admin${qs({ ...filterQs, page: page + 1 })}`}>
-              Older →
-            </Link>
-          ) : (
-            <span />
-          )}
-        </nav>
-      )}
+      <SubmissionsTable rows={tableRows} total={total} q={params.q} consent={params.consent} maxBulk={MAX_BULK}>
+        {pages > 1 && (
+          <nav className="flex items-center justify-between gap-3" aria-label="Pagination">
+            {page > 1 ? (
+              <Link className="btn-secondary" href={`/admin${qs({ ...filterQs, page: page - 1 })}`}>
+                ← Newer
+              </Link>
+            ) : (
+              <span />
+            )}
+            <span className="text-sm text-slate-600">
+              Page {page} of {pages}
+            </span>
+            {page < pages ? (
+              <Link className="btn-secondary" href={`/admin${qs({ ...filterQs, page: page + 1 })}`}>
+                Older →
+              </Link>
+            ) : (
+              <span />
+            )}
+          </nav>
+        )}
+      </SubmissionsTable>
     </div>
   );
-}
-
-function genderLabel(g: number | undefined) {
-  return g === 1 ? "Male" : g === 2 ? "Female" : undefined;
-}
-
-function ageGender(age?: number, gender?: number) {
-  return [typeof age === "number" ? `${age} y` : null, genderLabel(gender)].filter(Boolean).join(", ");
 }
 
 function Stat({ label, value }: { label: string; value: number }) {
@@ -196,14 +138,6 @@ function Stat({ label, value }: { label: string; value: number }) {
       <dt className="text-sm text-slate-600">{label}</dt>
       <dd className="mt-1 text-3xl font-bold text-slate-900 tabular-nums">{value.toLocaleString("en-IN")}</dd>
     </div>
-  );
-}
-
-function DuplicateBadge() {
-  return (
-    <span className="mt-1 ml-0 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 md:ml-2">
-      Duplicate ID
-    </span>
   );
 }
 

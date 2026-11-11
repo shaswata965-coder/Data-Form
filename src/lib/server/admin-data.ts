@@ -90,10 +90,34 @@ export async function getSubmission(id: string): Promise<WithId<SubmissionDoc> |
   return (await submissions()).findOne({ _id: new ObjectId(id) });
 }
 
+export function isRecordId(id: unknown): id is string {
+  return typeof id === "string" && ObjectId.isValid(id) && String(new ObjectId(id)) === id;
+}
+
 export async function deleteSubmission(id: string): Promise<boolean> {
-  if (!ObjectId.isValid(id) || String(new ObjectId(id)) !== id) return false;
+  if (!isRecordId(id)) return false;
   const res = await (await submissions()).deleteOne({ _id: new ObjectId(id) });
   return res.deletedCount === 1;
+}
+
+/** Upper limit for one bulk selection or bulk action. */
+export const MAX_BULK = 10_000;
+
+/** Record ids matching the filter, in the same order as the admin table (newest first). */
+export async function listIds(p: ListParams, limit: number): Promise<string[]> {
+  const docs = await (await submissions())
+    .find(buildFilter(p), { projection: { _id: 1 } })
+    .sort({ receivedAt: -1, _id: -1 })
+    .limit(Math.min(Math.max(1, limit), MAX_BULK))
+    .toArray();
+  return docs.map((d) => String(d._id));
+}
+
+export async function deleteSubmissions(ids: string[]): Promise<number> {
+  const valid = [...new Set(ids.filter(isRecordId))].map((id) => new ObjectId(id));
+  if (!valid.length) return 0;
+  const res = await (await submissions()).deleteMany({ _id: { $in: valid } });
+  return res.deletedCount;
 }
 
 export function appTimeZone(): string {

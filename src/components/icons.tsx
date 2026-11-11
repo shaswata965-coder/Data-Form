@@ -114,3 +114,10 @@ export const TrashIcon = (p: P) => (
     <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
   </svg>
 );
+
+export const PrinterIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+    <path d="M6 14h12v7H6z" />
+  </svg>
+);

@@ -149,7 +149,6 @@ export const questionnaire: Question[] = [
     id: "participantId",
     kind: "text",
     field: "participantId",
-    num: "1",
     en: "Participant ID",
     bn: "অংশগ্রহণকারীর আইডি",
     maxLength: 40,
@@ -159,7 +158,6 @@ export const questionnaire: Question[] = [
     id: "age",
     kind: "number",
     field: "age",
-    num: "2",
     en: "Age",
     bn: "বয়স",
     min: 1,
@@ -170,7 +168,6 @@ export const questionnaire: Question[] = [
     id: "gender",
     kind: "single",
     field: "gender",
-    num: "3",
     en: "Gender",
     bn: "লিঙ্গ",
     inline: true,
@@ -477,84 +474,53 @@ export const OHSI_REFERENCE = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Steps of the on-screen wizard                                        */
+/* Order of the form: shared participant details, then Annexure II     */
+/* (clinical examination), then Annexure IV (questionnaire).            */
+/* The form shows one question per screen in exactly this order.       */
 /* ------------------------------------------------------------------ */
 
-export type StepId =
-  | "consent"
-  | "participant"
-  | "household"
-  | "hygiene"
-  | "care"
-  | "clinical1"
-  | "clinical2"
-  | "review";
+export type SectionId = "participant" | "clinical" | "questionnaire";
 
-export interface Step {
-  id: StepId;
+export interface Section {
+  id: SectionId;
   title: Bilingual;
   part: string;
   questions: Question[];
 }
 
-const q = (id: string): Question => {
+const byId = (id: string): Question => {
   const found = [...questionnaire, ...clinical].find((x) => x.id === id);
   if (!found) throw new Error(`Unknown question ${id}`);
   return found;
 };
 
-export const STEPS: Step[] = [
-  {
-    id: "consent",
-    title: { en: "Consent", bn: "সম্মতি" },
-    part: "Annexure IV",
-    questions: [consentQuestion],
-  },
+export const SECTIONS: Section[] = [
   {
     id: "participant",
-    title: { en: "Participant information", bn: "অংশগ্রহণকারীর তথ্য" },
-    part: "Annexure IV · Questionnaire",
-    questions: ["participantId", "age", "gender", "maritalStatus", "education", "occupation"].map(q),
+    title: { en: "Participant details", bn: "অংশগ্রহণকারীর তথ্য" },
+    part: "Annexure II & IV",
+    questions: ["participantId", "age", "gender"].map(byId),
   },
   {
-    id: "household",
-    title: { en: "Residence & income", bn: "বাসস্থান ও আয়" },
-    part: "Annexure IV · Questionnaire",
-    questions: ["yearsInArea", "familyIncome", "houseType"].map(q),
+    id: "clinical",
+    title: { en: "Clinical examination" },
+    part: "Annexure II",
+    questions: clinical,
   },
   {
-    id: "hygiene",
-    title: { en: "Teeth cleaning habits", bn: "দাঁত পরিষ্কারের অভ্যাস" },
-    part: "Annexure IV · Questionnaire",
-    questions: ["brushTeeth", "brushTimes", "cleaningMethod", "adverseHabits"].map(q),
-  },
-  {
-    id: "care",
-    title: { en: "Dental visits & awareness", bn: "দাঁতের চিকিৎসা ও সচেতনতা" },
-    part: "Annexure IV · Questionnaire",
-    questions: ["dentistVisit", "awareDentalDiseases", "awarenessSource"].map(q),
-  },
-  {
-    id: "clinical1",
-    title: { en: "Clinical exam: Caries & periodontal health" },
-    part: "Annexure II · Clinical examination",
-    questions: ["dmft", "cpi"].map(q),
-  },
-  {
-    id: "clinical2",
-    title: { en: "Clinical exam: Hygiene, function & saliva" },
-    part: "Annexure II · Clinical examination",
-    questions: ["plaque", "functional", "otherCondition", "saliva"].map(q),
-  },
-  {
-    id: "review",
-    title: { en: "Review & submit", bn: "যাচাই করে জমা দিন" },
-    part: "Final check",
-    questions: [],
+    id: "questionnaire",
+    title: { en: "Oral Health Practice Questionnaire" },
+    part: "Annexure IV",
+    questions: questionnaire.filter((q) => !["participantId", "age", "gender"].includes(q.id)),
   },
 ];
 
-export const ALL_QUESTIONS: Question[] = [...questionnaire, ...clinical];
+/** Every question in the order it is asked. */
+export const ALL_QUESTIONS: Question[] = SECTIONS.flatMap((s) => s.questions);
+
+export function sectionOf(questionId: string): Section | undefined {
+  return SECTIONS.find((s) => s.questions.some((q) => q.id === questionId));
+}
 
 export function isVisible(question: Question, a: Answers): boolean {
   return question.showIf ? question.showIf(a) : true;

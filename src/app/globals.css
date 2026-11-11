@@ -43,6 +43,15 @@ body {
     @apply h-14 w-full rounded-xl border-2 border-slate-200 bg-white px-4 text-lg text-slate-900 placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-100 focus:outline-none aria-invalid:border-red-400;
   }
 
+  /* Big input used on the one-question screens */
+  .input-lg {
+    @apply h-20 w-full rounded-2xl border-[3px] border-slate-300 bg-white px-5 text-[24px] text-slate-900 placeholder:font-normal placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-100 focus:outline-none aria-invalid:border-red-500;
+  }
+
+  .animate-screen {
+    animation: screen-in 0.2s ease-out;
+  }
+
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-5 text-[16px] font-semibold text-white shadow-sm transition-colors hover:bg-teal-800 focus-visible:ring-4 focus-visible:ring-teal-200 focus-visible:outline-none active:bg-teal-900 disabled:cursor-not-allowed disabled:opacity-60;
   }
@@ -57,6 +66,17 @@ body {
   }
   .sheet::backdrop {
     background: rgb(15 23 42 / 0.5);
+  }
+}
+
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 

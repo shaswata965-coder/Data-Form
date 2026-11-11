@@ -1,68 +1,74 @@
 "use client";
 
-import { STEPS, isVisible, type Answers } from "@/lib/form-schema";
+import { SECTIONS, isVisible, type Answers } from "@/lib/form-schema";
 import { displayAnswer, questionTitle } from "@/lib/format";
-import type { FieldErrors } from "@/lib/validation";
 import { PencilIcon } from "../icons";
 import { Bn } from "./fields";
 
-export function Review({
-  answers,
-  errors,
+/** Every answer on one screen; tapping a row jumps to that question. */
+export function Review({ answers, onEdit }: { answers: Answers; onEdit: (screenId: string) => void }) {
+  return (
+    <div className="space-y-5">
+      <p className="rounded-2xl bg-teal-50 p-4 text-[18px] text-teal-950">
+        Check the answers. Tap any answer to change it.
+        <Bn className="block">উত্তরগুলো যাচাই করুন। পরিবর্তন করতে উত্তরের উপর চাপুন।</Bn>
+      </p>
+
+      <section className="overflow-hidden rounded-2xl border-2 border-slate-200 bg-white">
+        <Row
+          title="Consent Taken"
+          answer={{ en: answers.consent ? "Yes" : "No", bn: answers.consent ? "হ্যাঁ" : "না" }}
+          onEdit={() => onEdit("consent")}
+        />
+      </section>
+
+      {SECTIONS.map((section) => (
+        <section key={section.id} className="overflow-hidden rounded-2xl border-2 border-slate-200 bg-white">
+          <div className="border-b-2 border-slate-100 bg-slate-50 px-4 py-3">
+            <p className="text-[14px] font-bold tracking-wide text-teal-800 uppercase">{section.part}</p>
+            <h2 className="text-[20px] font-bold text-slate-900">{section.title.en}</h2>
+          </div>
+          <div className="divide-y-2 divide-slate-100">
+            {section.questions
+              .filter((q) => isVisible(q, answers))
+              .map((q) => (
+                <Row key={q.id} title={questionTitle(q)} answer={displayAnswer(q, answers)} onEdit={() => onEdit(q.id)} />
+              ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function Row({
+  title,
+  answer,
   onEdit,
 }: {
-  answers: Answers;
-  errors: FieldErrors;
-  onEdit: (stepIndex: number) => void;
+  title: string;
+  answer: { en: string; bn?: string } | null;
+  onEdit: () => void;
 }) {
   return (
-    <div className="space-y-4">
-      <p className="rounded-xl bg-teal-50 p-3 text-[15px] text-teal-900">
-        Check the answers below. Tap <strong>Edit</strong> to change a section.
-        <Bn className="block">উত্তরগুলো যাচাই করুন। পরিবর্তন করতে Edit চাপুন।</Bn>
-      </p>
-      {STEPS.map((step, index) => {
-        if (step.id === "review" || step.id === "consent") return null;
-        const qs = step.questions.filter((q) => isVisible(q, answers));
-        return (
-          <section key={step.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5">
-              <div className="min-w-0">
-                <p className="text-xs font-semibold tracking-wide text-teal-800 uppercase">{step.part}</p>
-                <h2 className="font-semibold text-slate-900">{step.title.en}</h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => onEdit(index)}
-                className="btn-secondary h-10 shrink-0 px-3 text-sm"
-              >
-                <PencilIcon className="h-4 w-4" /> Edit
-              </button>
-            </div>
-            <dl className="divide-y divide-slate-100">
-              {qs.map((q) => {
-                const ans = displayAnswer(q, answers);
-                const err = errors[q.id];
-                return (
-                  <div key={q.id} className="px-4 py-2.5">
-                    <dt className="text-sm text-slate-600">{questionTitle(q)}</dt>
-                    <dd className={`text-[16px] font-medium ${ans ? "text-slate-900" : "text-red-700"}`}>
-                      {ans ? (
-                        <>
-                          {ans.en}
-                          {ans.bn && <Bn className="block text-[15px] font-normal text-slate-600">{ans.bn}</Bn>}
-                        </>
-                      ) : (
-                        err?.en ?? "Not answered"
-                      )}
-                    </dd>
-                  </div>
-                );
-              })}
-            </dl>
-          </section>
-        );
-      })}
-    </div>
+    <button
+      type="button"
+      onClick={onEdit}
+      className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-slate-50 focus-visible:bg-teal-50 focus-visible:outline-none active:bg-slate-100"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block text-[16px] leading-snug text-slate-600">{title}</span>
+        {answer ? (
+          <span className="mt-0.5 block text-[19px] leading-snug font-semibold text-slate-900">
+            {answer.en}
+            {answer.bn && <Bn className="block text-[18px] font-normal text-slate-700">{answer.bn}</Bn>}
+          </span>
+        ) : (
+          <span className="mt-0.5 block text-[19px] font-semibold text-red-700">Not answered</span>
+        )}
+      </span>
+      <PencilIcon className="h-6 w-6 shrink-0 text-teal-700" aria-hidden />
+      <span className="sr-only">Edit</span>
+    </button>
   );
 }

@@ -3,7 +3,7 @@
 A mobile-first web app for collecting the **Oral Health Practice Questionnaire (Annexure IV)** and the
 **clinical oral examination (Annexure II)** in the field, with an admin area to view and export the data.
 
-- **Form** – `/` – free to use, no login. Bilingual (English + বাংলা), one step at a time, large tap targets.
+- **Form** – `/` – free to use, no login. Bilingual (English + বাংলা), one question per screen, large text and buttons.
 - **Admin** – `/admin` – single admin login, list / search / filter, record detail, delete, **CSV export**.
 - **Built for weak connections** – works fully offline after the first visit, autosaves every answer, and
   uploads finished forms automatically when the internet comes back.
@@ -14,23 +14,26 @@ Built with Next.js 16 (App Router), React 19, Tailwind CSS 4 and MongoDB.
 
 ## How the form works
 
-| Step | Contents |
+The form shows **one question per screen**, with large text and large buttons. Tapping an answer on a
+single-choice question moves to the next question automatically; typed answers, multiple-answer questions and
+"Others (specify)" use the big **Next** button. **Back** is always available.
+
+Order of the screens:
+
+| Part | Questions |
 | --- | --- |
-| 1. Consent | *Consent Taken* Yes / No. **No** → only the Participant ID is saved, as a refusal record. |
-| 2. Participant information | Q1 Participant ID, Q2 Age, Q3 Gender, Q4 Marital Status, Q5 Education, Q6 Occupation |
-| 3. Residence & income | Q7 Years in this area, Q8 Average family income, Q9 House type |
-| 4. Teeth cleaning habits | Q10 Brush teeth?, Q11 When (multiple, only if Q10 = Yes), Q12 Cleaning method, Q13 Adverse habits (multiple; "No" excludes the others) |
-| 5. Dental visits & awareness | Q14 Dentist visits, Q15 Aware of dental diseases?, Q16 Source (only if Q15 = Yes) |
-| 6. Clinical exam (Annexure II) | 1 DMFT (decayed / missing / filled teeth counts, or "d. No"), 2 CPI |
-| 7. Clinical exam (Annexure II) | 3 Plaque Index, 4 Functional Status, 5 Other oral condition, Saliva (+ OHSI reference text) |
-| 8. Review & submit | Every answer on one screen with **Edit** buttons |
+| Consent | *Consent Taken* Yes / No. **No** → only the Participant ID is asked and saved, as a refusal record. |
+| Participant details (Annexure II & IV) | Participant ID, Age, Gender – asked once, used for both annexures |
+| **Annexure II** – clinical examination | 1 DMFT (decayed / missing / filled teeth counts, or "d. No"), 2 CPI, 3 Plaque Index, 4 Functional Status, 5 Other oral condition, Saliva (+ OHSI reference text) |
+| **Annexure IV** – questionnaire | Q4 Marital Status … Q16 Source of awareness. Q11 is only asked if Q10 = Yes, Q16 only if Q15 = Yes. |
+| Review & submit | Every answer on one screen – tap any answer to change it, then return to the review |
 
 Details for collectors:
 
 - Every question shows the option numbers / scores from the paper form.
 - Numbers can be typed with English or Bengali digits (`৪৫` → 45).
-- Each step is checked before moving on (e.g. years lived in the area cannot exceed age; D+M+F ≤ 32).
-- The progress bar is tappable to jump back to earlier steps.
+- Each answer is checked before moving on (e.g. years lived in the area cannot exceed age; D+M+F ≤ 32).
+- The participant's ID, age and gender stay visible at the top during the examination and questionnaire.
 - A warning appears if the same Participant ID was already saved on that device.
 - The OHSI total is **not** calculated – the raw values are stored, and the reference text is shown.
 
@@ -62,12 +65,13 @@ Collection `submissions`, one document per participant:
   "participantId": "P-001",
   "consent": true,
   "answers": {
-    "consent": true, "participantId": "P-001", "age": 45, "gender": 2, "maritalStatus": 1,
-    "education": 3, "occupation": 3, "yearsInArea": 10, "familyIncome": 125000,
+    "consent": true, "participantId": "P-001", "age": 45, "gender": 2,
+    "dmftDecayed": 2, "dmftMissing": 1, "dmftFilled": 0, "dmftNone": false,
+    "cpi": 2, "plaque": 1, "functional": 0, "otherCondition": 0, "saliva": 0,
+    "maritalStatus": 1, "education": 3, "occupation": 3, "yearsInArea": 10, "familyIncome": 125000,
     "houseType": 5, "houseTypeOther": "Rented flat", "brushTeeth": 1, "brushTimes": [1, 3],
     "cleaningMethod": 1, "adverseHabits": [1, 3], "dentistVisit": 1, "awareDentalDiseases": 1,
-    "awarenessSource": 2, "dmftDecayed": 2, "dmftMissing": 1, "dmftFilled": 0, "dmftNone": false,
-    "cpi": 2, "plaque": 1, "functional": 0, "otherCondition": 0, "saliva": 0
+    "awarenessSource": 2
   },
   "schemaVersion": 1,
   "startedAt": "…", "clientCreatedAt": "…", "receivedAt": "…", "userAgent": "…"
@@ -155,9 +159,9 @@ src/
     api/submissions/             public upload endpoint (validated, idempotent)
     api/admin/                   login, logout, delete, CSV export
     manifest.ts                  PWA manifest
-  components/form/               form UI (steps, fields, review, device panel)
+  components/form/               form UI (one-question screens, review, device panel)
   components/admin/              admin UI pieces
-  lib/form-schema.ts             all questions & options (EN + BN)
+  lib/form-schema.ts             all questions & options (EN + BN) and their order
   lib/validation.ts              shared validation (browser + server)
   lib/client/                    draft autosave, upload queue, service worker registration
   lib/server/                    MongoDB, auth, rate limiting, CSV

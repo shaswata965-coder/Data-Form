@@ -5,14 +5,16 @@ import {
   ALL_QUESTIONS,
   OHSI_REFERENCE,
   SCHEMA_VERSION,
-  STEPS,
+  SECTIONS,
   isVisible,
-  questionnaire,
   type Answers,
+  type Bilingual,
   type Question,
+  type Section,
+  type SingleQuestion,
   type TextQuestion,
 } from "@/lib/form-schema";
-import { checkQuestion, cleanSubmission, validateStep, type FieldErrors } from "@/lib/validation";
+import { checkQuestion, cleanSubmission } from "@/lib/validation";
 import { clearDraft, hasContent, loadDraft, saveDraft, type Draft } from "@/lib/client/draft";
 import { enqueue } from "@/lib/client/outbox";
 import { newId, requestPersistentStorage, writeJSON } from "@/lib/client/storage";
@@ -32,51 +34,55 @@ import {
 import { DevicePanel } from "./DevicePanel";
 import {
   Bn,
-  DmftField,
+  ChoiceList,
+  ConsentChoice,
+  DmftInput,
   ErrorText,
-  MultiChoice,
-  NumberField,
-  SingleChoice,
-  TextField,
+  MultiList,
+  NumberInput,
+  QuestionHeading,
+  TextInput,
   type Patch,
 } from "./fields";
 import { Review } from "./Review";
 import { useDeviceSync, type DeviceSync } from "./useDeviceSync";
 
-const LAST = STEPS.length - 1;
-const participantIdQ = questionnaire.find((q) => q.id === "participantId") as TextQuestion;
+const participantIdQ = ALL_QUESTIONS.find((q) => q.id === "participantId") as TextQuestion;
+/** Pause after tapping an answer so the collector sees it selected before moving on. */
+const AUTO_ADVANCE_MS = 350;
+const CONSENT_ERROR: Bilingual = { en: "Please select Yes or No", bn: "হ্যাঁ অথবা না নির্বাচন করুন" };
+
+type Screen =
+  | { kind: "consent"; id: "consent" }
+  | { kind: "question"; id: string; question: Question; section: Section }
+  | { kind: "review"; id: "review" };
+
+/**
+ * One screen per question: consent, participant details, Annexure II
+ * (clinical examination), Annexure IV (questionnaire), review. Questions that
+ * do not apply (Q11 when Q10 = No, Q16 when Q15 = No) are left out.
+ * Without consent only the Participant ID is asked.
+ */
+function buildScreens(a: Answers): Screen[] {
+  const screens: Screen[] = [{ kind: "consent", id: "consent" }];
+  if (a.consent === false) {
+    screens.push({ kind: "question", id: participantIdQ.id, question: participantIdQ, section: SECTIONS[0] });
+    return screens;
+  }
+  for (const section of SECTIONS) {
+    for (const question of section.questions) {
+      if (isVisible(question, a)) screens.push({ kind: "question", id: question.id, question, section });
+    }
+  }
+  screens.push({ kind: "review", id: "review" });
+  return screens;
+}
 
 const noopSubscribe = () => () => {};
 
 function newDraft(): Draft {
   const now = new Date().toISOString();
-  return { v: 1, clientId: newId(), answers: {}, stepIndex: 0, maxStep: 0, startedAt: now, updatedAt: now };
-}
-
-function prefersReducedMotion() {
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-}
-
-function scrollToQuestion(id: string) {
-  requestAnimationFrame(() => {
-    document
-      .querySelector(`[data-question="${id}"]`)
-      ?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
-  });
-}
-
-/** After an answer, bring the next question into view if it is below the fold. */
-function revealNextQuestion(answeredId: string) {
-  window.setTimeout(() => {
-    const cards = Array.from(document.querySelectorAll<HTMLElement>("[data-question]"));
-    const idx = cards.findIndex((c) => c.dataset.question === answeredId);
-    const next = cards[idx + 1];
-    if (!next) return;
-    const top = next.getBoundingClientRect().top;
-    if (top > window.innerHeight * 0.55) {
-      next.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
-    }
-  }, 160);
+  return { v: 2, clientId: newId(), answers: {}, screenId: "consent", reviewed: false, startedAt: now, updatedAt: now };
 }
 
 /** Renders a placeholder on the server and during hydration, the form after. */
@@ -90,11 +96,14 @@ function Skeleton() {
   return (
     <div className="min-h-dvh">
       <AppHeader />
-      <main className="mx-auto max-w-2xl px-4 py-6" aria-busy="true">
-        <p className="text-slate-600">Loading form… · <Bn>ফর্ম লোড হচ্ছে…</Bn></p>
-        <div className="mt-4 space-y-4">
+      <main className="mx-auto max-w-xl px-4 py-6" aria-busy="true">
+        <p className="text-[18px] text-slate-600">
+          Loading form… · <Bn>ফর্ম লোড হচ্ছে…</Bn>
+        </p>
+        <div className="mt-5 space-y-3">
+          <div className="h-10 w-3/4 animate-pulse rounded-xl bg-white" />
           {[0, 1, 2].map((i) => (
-            <div key={i} className="h-32 animate-pulse rounded-2xl bg-white" />
+            <div key={i} className="h-20 animate-pulse rounded-2xl bg-white" />
           ))}
         </div>
       </main>
@@ -106,29 +115,27 @@ function AppHeader({ sync, onOpenPanel }: { sync?: DeviceSync; onOpenPanel?: () 
   const waiting = sync?.items.length ?? 0;
   return (
     <header className="bg-teal-800 text-white">
-      <div className="mx-auto flex h-14 max-w-2xl items-center gap-2.5 px-4">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/15">
-          <ToothIcon className="h-6 w-6" />
+      <div className="mx-auto flex h-16 max-w-xl items-center gap-2.5 px-4">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/15">
+          <ToothIcon className="h-7 w-7" />
         </span>
         <div className="min-w-0 leading-tight">
-          <p className="truncate text-[15px] font-semibold">Oral Health Data Form</p>
-          <p className="truncate text-xs text-teal-100">Annexure II &amp; IV</p>
+          <p className="truncate text-[17px] font-semibold">Oral Health Data Form</p>
+          <p className="truncate text-sm text-teal-100">Annexure II &amp; IV</p>
         </div>
         {sync && (
           <button
             type="button"
             onClick={onOpenPanel}
-            className="ml-auto flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-2.5 text-sm font-medium hover:bg-white/25"
+            className="ml-auto flex h-12 shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-3 text-[16px] font-semibold hover:bg-white/25"
             aria-label={`Device status: ${sync.online ? "online" : "offline"}, ${waiting} waiting to upload`}
           >
-            {sync.online && !sync.unstable ? (
-              <CloudCheck className="h-5 w-5" />
-            ) : (
-              <CloudOff className="h-5 w-5" />
-            )}
-            <span>{sync.online ? (sync.unstable ? "Weak" : "Online") : "Offline"}</span>
+            {sync.online && !sync.unstable ? <CloudCheck className="h-6 w-6" /> : <CloudOff className="h-6 w-6" />}
+            <span className="hidden min-[360px]:inline">
+              {sync.online ? (sync.unstable ? "Weak" : "Online") : "Offline"}
+            </span>
             {waiting > 0 && (
-              <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-amber-400 px-1.5 text-xs font-bold text-amber-950">
+              <span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-amber-400 px-1.5 text-sm font-bold text-amber-950">
                 {waiting}
               </span>
             )}
@@ -157,22 +164,34 @@ function FormInner() {
   });
   const [restored, setRestored] = useState(() => hasContent(draft.answers));
   const [storageOk] = useState(storageWorks);
-  const [errors, setErrors] = useState<FieldErrors>({});
+  const [error, setError] = useState<{ id: string; err: Bilingual } | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const sync = useDeviceSync();
   const panelRef = useRef<HTMLDialogElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const draftRef = useRef(draft);
+  const advanceTimer = useRef<number | null>(null);
   const firstRender = useRef(true);
 
   const answers = draft.answers;
   const refusal = answers.consent === false;
-  const step = STEPS[draft.stepIndex];
+  const screens = useMemo(() => buildScreens(answers), [answers]);
+  const index = Math.max(0, screens.findIndex((s) => s.id === draft.screenId));
+  const screen = screens[index];
+  const hasTextInput = screen.kind === "question" && (screen.question.kind === "number" || screen.question.kind === "text");
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
 
   useEffect(() => {
     void registerServiceWorker();
     void requestPersistentStorage();
+    return () => {
+      if (advanceTimer.current) window.clearTimeout(advanceTimer.current);
+    };
   }, []);
 
   // Autosave every change so a reload, crash or closed tab never loses data.
@@ -180,76 +199,52 @@ function FormInner() {
     if (!done) saveDraft(draft);
   }, [draft, done]);
 
-  // Move focus to the step title for keyboard & screen-reader users.
+  // New screen: move focus to the question for screen readers (inputs focus themselves).
   useEffect(() => {
     if (firstRender.current) {
       firstRender.current = false;
       return;
     }
-    headingRef.current?.focus({ preventScroll: true });
-  }, [draft.stepIndex, done]);
+    if (!hasTextInput) headingRef.current?.focus({ preventScroll: true });
+  }, [screen.id, done, hasTextInput]);
 
-  const answersRef = useRef(answers);
-  useEffect(() => {
-    answersRef.current = answers;
-  }, [answers]);
-
-  const patch: Patch = useCallback((p, opts) => {
-    if (opts?.answeredId) {
-      const current = answersRef.current;
-      const wasEmpty = Object.keys(p).every((k) => {
-        const v = current[k as keyof Answers];
-        return v === undefined || (Array.isArray(v) && v.length === 0);
-      });
-      if (wasEmpty) revealNextQuestion(opts.answeredId);
+  const cancelAutoAdvance = () => {
+    if (advanceTimer.current) {
+      window.clearTimeout(advanceTimer.current);
+      advanceTimer.current = null;
     }
+  };
+
+  const patch: Patch = useCallback((p) => {
     setDraft((d) => ({ ...d, answers: { ...d.answers, ...p }, updatedAt: new Date().toISOString() }));
   }, []);
 
-  // Errors are flagged when the collector presses Next; each one disappears
-  // as soon as the answer is fixed.
-  const shownErrors = useMemo(() => {
-    const out: FieldErrors = {};
-    for (const [id, err] of Object.entries(errors)) {
-      if (id === "consent") {
-        if (answers.consent === undefined) out[id] = err;
-        continue;
-      }
-      const q = id === "participantId" ? participantIdQ : ALL_QUESTIONS.find((x) => x.id === id);
-      if (q && checkQuestion(q, answers)) out[id] = checkQuestion(q, answers)!;
-    }
-    return out;
-  }, [errors, answers]);
-
-  const goTo = (index: number) => {
-    setDraft((d) => ({ ...d, stepIndex: index, maxStep: Math.max(d.maxStep, index) }));
+  const goTo = (id: string) => {
+    cancelAutoAdvance();
+    setError(null);
+    setDraft((d) => ({ ...d, screenId: id, reviewed: d.reviewed || id === "review" }));
     window.scrollTo({ top: 0 });
-  };
-
-  const showErrors = (errs: FieldErrors) => {
-    setErrors(errs);
-    const first = Object.keys(errs)[0];
-    if (first) scrollToQuestion(first);
   };
 
   const submit = async (toSave: Answers) => {
     const result = cleanSubmission(toSave);
     if (!result.ok) {
-      const idx = STEPS.findIndex((s) =>
-        s.id === "consent"
-          ? Boolean(result.errors.consent || (refusal && result.errors.participantId))
-          : s.questions.some((q) => result.errors[q.id]),
+      const first = buildScreens(toSave).find((s) =>
+        s.kind === "consent" ? Boolean(result.errors.consent) : s.kind === "question" && result.errors[s.id],
       );
-      if (idx >= 0 && idx !== draft.stepIndex) goTo(idx);
-      window.setTimeout(() => showErrors(result.errors), 50);
+      if (first) {
+        goTo(first.id);
+        setError({ id: first.id, err: result.errors[first.id] ?? CONSENT_ERROR });
+      }
       return;
     }
     setSubmitting(true);
     setSaveError(null);
+    const { clientId, startedAt } = draftRef.current;
     const payload = {
-      clientId: draft.clientId,
+      clientId,
       clientCreatedAt: new Date().toISOString(),
-      startedAt: draft.startedAt,
+      startedAt,
       schemaVersion: SCHEMA_VERSION,
       answers: result.answers,
     };
@@ -257,48 +252,70 @@ function FormInner() {
       await enqueue(payload);
     } catch {
       setSubmitting(false);
-      setSaveError(
-        "Could not save on this device. Free up storage or turn off private browsing, then try again.",
-      );
+      setSaveError("Could not save on this device. Free up storage or turn off private browsing, then try again.");
       return;
     }
     clearDraft();
     setSubmitting(false);
     setDone({
-      clientId: payload.clientId,
+      clientId,
       participantId: result.answers.participantId ?? "",
       consent: result.answers.consent === true,
       phase: "uploading",
     });
     window.scrollTo({ top: 0 });
     await sync.flush();
-    setDone((d) => (d && d.clientId === payload.clientId ? { ...d, phase: "settled" } : d));
+    setDone((d) => (d && d.clientId === clientId ? { ...d, phase: "settled" } : d));
   };
 
-  const onPrimary = () => {
-    if (step.id === "consent") {
-      if (answers.consent === undefined) return showErrors({ consent: { en: "Please select Yes or No", bn: "হ্যাঁ অথবা না নির্বাচন করুন" } });
-      if (refusal) {
-        const e = checkQuestion(participantIdQ, answers);
-        if (e) return showErrors({ participantId: e });
-        void submit({ consent: false, participantId: answers.participantId });
-        return;
-      }
+  /** Where "Next" leads from the current screen (null = stay, show error). */
+  const nextTarget = (d: Draft): { go?: string; submit?: Answers; error?: Bilingual } => {
+    const a = d.answers;
+    const list = buildScreens(a);
+    const i = Math.max(0, list.findIndex((s) => s.id === d.screenId));
+    const s = list[i];
+    if (s.kind === "consent") return a.consent === undefined ? { error: CONSENT_ERROR } : { go: list[1].id };
+    if (s.kind === "review") return { submit: a };
+    const err = checkQuestion(s.question, a);
+    if (err) return { error: err };
+    if (a.consent === false) return { submit: { consent: false, participantId: a.participantId } };
+    if (d.reviewed) {
+      // Editing from the review screen: go back to it, unless an edit made a new question appear.
+      const missing = list.slice(i + 1).find((x) => x.kind === "question" && checkQuestion(x.question, a));
+      return { go: missing ? missing.id : "review" };
     }
-    if (step.id === "review") {
-      void submit(answers);
+    return { go: list[i + 1].id };
+  };
+
+  const goNext = () => {
+    cancelAutoAdvance();
+    const t = nextTarget(draftRef.current);
+    if (t.error) {
+      setError({ id: draftRef.current.screenId, err: t.error });
       return;
     }
-    const errs = validateStep(step, answers);
-    if (Object.keys(errs).length) return showErrors(errs);
-    setErrors({});
-    goTo(editingFromReview ? LAST : draft.stepIndex + 1);
+    if (t.submit) void submit(t.submit);
+    else if (t.go) goTo(t.go);
+  };
+
+  const goBack = () => {
+    if (index > 0) goTo(screens[index - 1].id);
+  };
+
+  const autoAdvance = () => {
+    cancelAutoAdvance();
+    advanceTimer.current = window.setTimeout(goNext, AUTO_ADVANCE_MS);
+  };
+
+  const onPicked = (q: SingleQuestion, value: number) => {
+    if (q.other && value === q.other.value) return; // let them type the "specify" text
+    autoAdvance();
   };
 
   const startNext = () => {
     setDraft(newDraft());
     setDone(null);
-    setErrors({});
+    setError(null);
     setRestored(false);
     window.scrollTo({ top: 0 });
   };
@@ -309,7 +326,31 @@ function FormInner() {
   };
 
   const openPanel = () => panelRef.current?.showModal();
-  const editingFromReview = draft.maxStep === LAST && step.id !== "review" && !refusal;
+
+  // Error for this screen, re-checked live so it disappears once fixed.
+  const shownError: Bilingual | null = (() => {
+    if (!error || error.id !== screen.id) return null;
+    if (screen.kind === "consent") return answers.consent === undefined ? error.err : null;
+    if (screen.kind === "question") return checkQuestion(screen.question, answers);
+    return null;
+  })();
+
+  const questionScreens = screens.filter((s) => s.kind === "question");
+  const qNumber = questionScreens.findIndex((s) => s.id === screen.id) + 1;
+  const progress =
+    screen.kind === "consent" ? 0.02 : screen.kind === "review" ? 1 : qNumber / (questionScreens.length + 1);
+
+  const target = nextTarget(draft);
+  const primaryLabel: Bilingual = submitting
+    ? { en: "Saving…", bn: "সংরক্ষণ হচ্ছে…" }
+    : screen.kind === "review"
+      ? { en: "Submit", bn: "জমা দিন" }
+      : refusal && screen.kind === "question"
+        ? { en: "Save", bn: "জমা দিন" }
+        : target.go === "review" && draft.reviewed
+          ? { en: "Review", bn: "যাচাই" }
+          : { en: "Next", bn: "পরবর্তী" };
+  const primaryIsSubmit = screen.kind === "review" || (refusal && screen.kind === "question");
 
   const duplicateWarning = (() => {
     const id = (answers.participantId ?? "").trim().toLowerCase();
@@ -317,8 +358,8 @@ function FormInner() {
     const hit = sync.log.find((e) => e.clientId !== draft.clientId && e.participantId.trim().toLowerCase() === id);
     if (!hit) return null;
     return (
-      <p className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 p-2.5 text-sm text-amber-900">
-        <AlertIcon className="mt-0.5 h-4 w-4 shrink-0" />
+      <p className="mt-4 flex items-start gap-2.5 rounded-2xl bg-amber-50 p-4 text-[17px] text-amber-950">
+        <AlertIcon className="mt-0.5 h-6 w-6 shrink-0" />
         <span>
           A form with this Participant ID was already saved on this device (
           {new Date(hit.savedAt).toLocaleDateString("en-GB")}). Check the ID if this is a different person.
@@ -327,97 +368,68 @@ function FormInner() {
     );
   })();
 
-  const renderQuestion = (q: Question) => {
-    if (!isVisible(q, answers)) return null;
-    const err = shownErrors[q.id];
-    const next = () => revealNextQuestion(q.id);
+  const titleId = `title-${screen.id}`;
+
+  const renderInput = (q: Question) => {
     switch (q.kind) {
       case "single":
-        return <SingleChoice key={q.id} q={q} answers={answers} error={err} patch={patch} />;
+        return <ChoiceList q={q} answers={answers} patch={patch} labelledBy={titleId} onPicked={(v) => onPicked(q, v)} />;
       case "multi":
-        return <MultiChoice key={q.id} q={q} answers={answers} error={err} patch={patch} />;
+        return <MultiList q={q} answers={answers} patch={patch} labelledBy={titleId} />;
       case "number":
-        return <NumberField key={q.id} q={q} answers={answers} error={err} patch={patch} onEnter={next} />;
+        return <NumberInput q={q} answers={answers} patch={patch} labelledBy={titleId} invalid={Boolean(shownError)} onEnter={goNext} />;
       case "text":
-        return (
-          <TextField
-            key={q.id}
-            q={q}
-            answers={answers}
-            error={err}
-            patch={patch}
-            onEnter={next}
-            warning={q.id === "participantId" ? duplicateWarning : undefined}
-          />
-        );
+        return <TextInput q={q} answers={answers} patch={patch} labelledBy={titleId} invalid={Boolean(shownError)} onEnter={goNext} />;
       case "dmft":
-        return <DmftField key={q.id} q={q} answers={answers} error={err} patch={patch} />;
+        return <DmftInput answers={answers} patch={patch} labelledBy={titleId} />;
     }
   };
 
-  const visibleSteps = refusal ? 1 : STEPS.length;
-  const primaryLabel = submitting
-    ? { en: "Saving…", bn: "সংরক্ষণ হচ্ছে…" }
-    : step.id === "consent" && refusal
-      ? { en: "Save refusal", bn: "জমা দিন" }
-      : step.id === "review"
-        ? { en: "Submit", bn: "জমা দিন" }
-        : editingFromReview
-          ? { en: "Save & review", bn: "যাচাই করুন" }
-          : step.id === "consent"
-            ? { en: "Start", bn: "শুরু করুন" }
-            : { en: "Next", bn: "পরবর্তী" };
-
   return (
-    <div className="min-h-dvh pb-[calc(6rem+env(safe-area-inset-bottom))]">
+    <div className="min-h-dvh pb-[calc(7.5rem+env(safe-area-inset-bottom))]">
       <div className="sticky top-0 z-20 shadow-sm">
         <AppHeader sync={sync} onOpenPanel={openPanel} />
         {!done && (
           <div className="bg-white">
-            <nav aria-label="Form progress" className="mx-auto flex max-w-2xl gap-1 px-4 pt-2.5">
-              {Array.from({ length: visibleSteps }, (_, i) => {
-                const reachable = i <= draft.maxStep && !refusal && i !== draft.stepIndex;
-                return (
-                  <button
-                    key={STEPS[i].id}
-                    type="button"
-                    disabled={!reachable}
-                    onClick={() => goTo(i)}
-                    aria-label={`Step ${i + 1}: ${STEPS[i].title.en}`}
-                    aria-current={i === draft.stepIndex ? "step" : undefined}
-                    className="group flex h-6 flex-1 items-center disabled:cursor-default"
-                  >
-                    <span
-                      className={`h-1.5 w-full rounded-full transition-colors ${
-                        i === draft.stepIndex
-                          ? "bg-teal-700"
-                          : i <= draft.maxStep
-                            ? "bg-teal-300 group-hover:bg-teal-500"
-                            : "bg-slate-200"
-                      }`}
-                    />
-                  </button>
-                );
-              })}
-            </nav>
-            <p className="mx-auto max-w-2xl px-4 pb-2 text-xs font-medium text-slate-500">
-              Step {draft.stepIndex + 1} of {visibleSteps} · {step.title.en}
-            </p>
+            <div className="mx-auto max-w-xl px-4 pt-3 pb-2.5">
+              <div
+                className="h-2.5 overflow-hidden rounded-full bg-slate-200"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(progress * 100)}
+                aria-label="Form progress"
+              >
+                <div className="h-full rounded-full bg-teal-600 transition-[width] duration-300" style={{ width: `${progress * 100}%` }} />
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2 text-[15px] font-semibold text-slate-600">
+                <span className="truncate">
+                  {screen.kind === "question" ? screen.section.part : screen.kind === "consent" ? "Annexure IV" : "Final check"}
+                </span>
+                <span className="shrink-0 tabular-nums">
+                  {screen.kind === "question"
+                    ? `Question ${qNumber} of ${questionScreens.length}`
+                    : screen.kind === "consent"
+                      ? "Consent"
+                      : "Review"}
+                </span>
+              </div>
+            </div>
           </div>
         )}
         {!sync.online && (
-          <div className="bg-slate-800 px-4 py-2 text-center text-sm text-white" role="status">
-            Offline – keep filling, everything is saved on this device. ·{" "}
-            <Bn>অফলাইনে আছেন – তথ্য এই ডিভাইসে সংরক্ষিত থাকবে।</Bn>
+          <div className="bg-slate-800 px-4 py-2 text-center text-[15px] text-white" role="status">
+            Offline – keep filling, everything is saved on this device.
+            <Bn className="block">অফলাইনে আছেন – তথ্য এই ডিভাইসে সংরক্ষিত থাকবে।</Bn>
           </div>
         )}
       </div>
 
-      <main className="mx-auto max-w-2xl px-4">
+      <main className="mx-auto max-w-xl px-4">
         {!storageOk && (
           <Banner tone="danger">
-            This browser is blocking storage (private mode?). Forms cannot be kept offline – stay connected
-            until each form is uploaded.
+            This browser is blocking storage (private mode?). Forms cannot be kept offline – stay connected until each
+            form is uploaded.
           </Banner>
         )}
 
@@ -427,17 +439,18 @@ function FormInner() {
           <>
             {restored && (
               <Banner tone="info">
-                <span className="flex-1">
-                  Unsaved form restored{answers.participantId ? ` (ID ${answers.participantId})` : ""}. Continue
-                  where you left off. · <Bn>আগের অসম্পূর্ণ ফর্মটি ফিরিয়ে আনা হয়েছে।</Bn>
+                <span>
+                  Unsaved form restored{answers.participantId ? ` (ID ${answers.participantId})` : ""}. Continue where
+                  you left off.
+                  <Bn className="block">আগের অসম্পূর্ণ ফর্মটি ফিরিয়ে আনা হয়েছে।</Bn>
                 </span>
-                <span className="mt-2 flex gap-2">
-                  <button type="button" className="btn-secondary h-9 px-3 text-sm" onClick={() => setRestored(false)}>
+                <span className="mt-3 flex gap-2">
+                  <button type="button" className="btn-secondary h-12 px-5" onClick={() => setRestored(false)}>
                     OK
                   </button>
                   <button
                     type="button"
-                    className="btn-secondary h-9 px-3 text-sm text-red-700"
+                    className="btn-secondary h-12 px-5 text-red-700"
                     onClick={() => {
                       if (confirm("Discard this unsaved form and start a new one?")) discardCurrent();
                     }}
@@ -448,47 +461,86 @@ function FormInner() {
               </Banner>
             )}
 
-            {step.id === "consent" && sync.items.length > 0 && (
+            {screen.kind === "consent" && sync.items.length > 0 && (
               <Banner tone="warn">
-                <span className="flex-1">
+                <span>
                   {sync.items.length} saved form{sync.items.length > 1 ? "s are" : " is"} waiting to upload. They will
                   upload automatically when the internet is available.
                 </span>
-                <button type="button" className="btn-secondary mt-2 h-9 px-3 text-sm" onClick={openPanel}>
+                <button type="button" className="btn-secondary mt-3 h-12 self-start px-5" onClick={openPanel}>
                   View
                 </button>
               </Banner>
             )}
 
-            <div className="pt-5 pb-3">
-              <p className="text-xs font-bold tracking-wide text-teal-800 uppercase">{step.part}</p>
-              <h1 ref={headingRef} tabIndex={-1} className="text-2xl leading-tight font-bold text-slate-900 outline-none">
-                {step.title.en}
-                {step.title.bn && <Bn className="mt-0.5 block text-lg font-semibold text-slate-600">{step.title.bn}</Bn>}
-              </h1>
-              {(step.id === "clinical1" || step.id === "clinical2") && <ParticipantChip answers={answers} />}
-            </div>
-
-            <div className="space-y-4">
-              {step.id === "consent" ? (
-                <ConsentStep answers={answers} errors={shownErrors} patch={patch} warning={duplicateWarning} />
-              ) : step.id === "review" ? (
-                <Review answers={answers} errors={shownErrors} onEdit={goTo} />
-              ) : (
-                step.questions.map(renderQuestion)
+            <div key={screen.id} className="animate-screen pt-6">
+              {screen.kind === "consent" && (
+                <>
+                  <p className="text-[16px] font-bold tracking-wide text-teal-800 uppercase">Oral Health Practice Questionnaire</p>
+                  <h1
+                    id={titleId}
+                    ref={headingRef}
+                    tabIndex={-1}
+                    className="mt-1 text-[30px] leading-tight font-bold text-slate-900 outline-none"
+                  >
+                    Consent Taken
+                  </h1>
+                  <p className="mt-2 mb-5 text-[18px] text-slate-700">
+                    For the clinical examination (Annexure II) and the questionnaire (Annexure IV).
+                  </p>
+                  <ConsentChoice
+                    value={answers.consent}
+                    labelledBy={titleId}
+                    onChange={(v) => patch({ consent: v })}
+                    onPicked={autoAdvance}
+                  />
+                  <ErrorText id={`${titleId}-err`} error={shownError} />
+                </>
               )}
 
-              {step.id === "clinical2" && (
-                <details className="rounded-2xl border border-slate-200 bg-white p-4 text-[15px] text-slate-700">
-                  <summary className="cursor-pointer font-semibold text-slate-900">OHSI reference</summary>
-                  <p className="mt-2 font-medium">{OHSI_REFERENCE.formula}</p>
-                  <p className="mt-2 font-medium">Interpretation of OHSI:</p>
-                  <ul className="mt-1 space-y-0.5">
-                    {OHSI_REFERENCE.interpretation.map((line) => (
-                      <li key={line}>{line}</li>
-                    ))}
-                  </ul>
-                </details>
+              {screen.kind === "question" && (
+                <>
+                  {screen.section.id !== "participant" && <ParticipantChip answers={answers} />}
+                  {refusal && (
+                    <p className="mb-5 flex items-start gap-2.5 rounded-2xl bg-slate-200/70 p-4 text-[17px] text-slate-800">
+                      <InfoIcon className="mt-0.5 h-6 w-6 shrink-0" />
+                      <span>No consent: the examination and questionnaire are skipped. Only the Participant ID is saved, to record the refusal.</span>
+                    </p>
+                  )}
+                  <QuestionHeading q={screen.question} id={titleId} headingRef={headingRef} />
+                  <div className="mt-6">{renderInput(screen.question)}</div>
+                  <ErrorText id={`${titleId}-err`} error={shownError} />
+                  {screen.id === "participantId" && duplicateWarning}
+                  {screen.id === "saliva" && (
+                    <details className="mt-6 rounded-2xl border-2 border-slate-200 bg-white p-4 text-[17px] text-slate-700">
+                      <summary className="cursor-pointer text-[18px] font-semibold text-slate-900">OHSI reference</summary>
+                      <p className="mt-2 font-medium">{OHSI_REFERENCE.formula}</p>
+                      <p className="mt-2 font-medium">Interpretation of OHSI:</p>
+                      <ul className="mt-1 space-y-0.5">
+                        {OHSI_REFERENCE.interpretation.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </>
+              )}
+
+              {screen.kind === "review" && (
+                <>
+                  <h1
+                    id={titleId}
+                    ref={headingRef}
+                    tabIndex={-1}
+                    className="text-[30px] leading-tight font-bold text-slate-900 outline-none"
+                  >
+                    Review &amp; submit
+                    <Bn className="mt-1 block text-[24px] font-semibold text-slate-700">যাচাই করে জমা দিন</Bn>
+                  </h1>
+                  <div className="mt-5">
+                    <Review answers={answers} onEdit={goTo} />
+                  </div>
+                </>
               )}
 
               {saveError && (
@@ -502,24 +554,19 @@ function FormInner() {
       </main>
 
       {!done && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
-          <div className="mx-auto flex max-w-2xl gap-3 px-4 py-3">
-            {draft.stepIndex > 0 && (
-              <button type="button" onClick={() => goTo(draft.stepIndex - 1)} className="btn-secondary h-13 px-4">
-                <ArrowLeft className="h-5 w-5" />
-                <span>Back</span>
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t-2 border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+          <div className="mx-auto flex max-w-xl gap-3 px-4 py-3">
+            {index > 0 && (
+              <button type="button" onClick={goBack} className="btn-secondary h-16 rounded-2xl px-5 text-[20px]" aria-label="Back">
+                <ArrowLeft className="h-7 w-7" />
+                <span className="hidden min-[440px]:inline">Back</span>
               </button>
             )}
-            <button
-              type="button"
-              onClick={onPrimary}
-              disabled={submitting}
-              className="btn-primary h-13 flex-1"
-            >
-              <span>
+            <button type="button" onClick={goNext} disabled={submitting} className="btn-primary h-16 flex-1 rounded-2xl text-[21px]">
+              <span className="whitespace-nowrap">
                 {primaryLabel.en} · <Bn>{primaryLabel.bn}</Bn>
               </span>
-              {step.id === "review" || refusal ? <UploadIcon className="h-5 w-5" /> : <ArrowRight className="h-5 w-5" />}
+              {primaryIsSubmit ? <UploadIcon className="h-7 w-7" /> : <ArrowRight className="h-7 w-7" />}
             </button>
           </div>
         </div>
@@ -530,99 +577,17 @@ function FormInner() {
   );
 }
 
-function ConsentStep({
-  answers,
-  errors,
-  patch,
-  warning,
-}: {
-  answers: Answers;
-  errors: FieldErrors;
-  patch: Patch;
-  warning: React.ReactNode;
-}) {
-  const options = [
-    { value: true, en: "Yes", bn: "হ্যাঁ" },
-    { value: false, en: "No", bn: "না" },
-  ];
-  return (
-    <>
-      <section
-        data-question="consent"
-        className={`scroll-mt-32 rounded-2xl border bg-white p-4 shadow-sm sm:p-5 ${
-          errors.consent ? "border-red-300 ring-2 ring-red-100" : "border-slate-200"
-        }`}
-      >
-        <h2 id="consent-title" className="text-[17px] font-semibold text-slate-900">
-          Consent Taken
-        </h2>
-        <p className="mt-1 text-[15px] text-slate-600">
-          Oral Health Practice Questionnaire and clinical examination.
-        </p>
-        <div role="radiogroup" aria-labelledby="consent-title" className="mt-3 grid grid-cols-2 gap-3">
-          {options.map((o) => {
-            const checked = answers.consent === o.value;
-            return (
-              <label
-                key={o.en}
-                className={`flex min-h-20 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 p-3 text-center transition-colors select-none has-[:focus-visible]:ring-4 has-[:focus-visible]:ring-teal-200 ${
-                  checked
-                    ? o.value
-                      ? "border-teal-700 bg-teal-50"
-                      : "border-slate-700 bg-slate-100"
-                    : "border-slate-200 bg-white active:bg-slate-50"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="consent"
-                  className="sr-only"
-                  checked={checked}
-                  onChange={() => patch({ consent: o.value }, { answeredId: "consent" })}
-                />
-                <span className="text-xl font-bold text-slate-900">{o.en}</span>
-                <Bn className="text-lg text-slate-600">{o.bn}</Bn>
-                {checked && <CheckIcon className="mt-1 h-5 w-5 text-teal-700" strokeWidth={3} />}
-              </label>
-            );
-          })}
-        </div>
-        <ErrorText id="consent-err" error={errors.consent} />
-      </section>
-
-      {answers.consent === false && (
-        <>
-          <p className="flex items-start gap-2 rounded-xl bg-slate-100 p-3 text-[15px] text-slate-700">
-            <InfoIcon className="mt-0.5 h-5 w-5 shrink-0" />
-            <span>
-              Without consent the questionnaire and examination are skipped. Only the Participant ID is saved, to
-              record the refusal.
-            </span>
-          </p>
-          <TextField
-            q={participantIdQ}
-            answers={answers}
-            error={errors.participantId}
-            patch={patch}
-            warning={warning}
-          />
-        </>
-      )}
-    </>
-  );
-}
-
 function ParticipantChip({ answers }: { answers: Answers }) {
   const gender = answers.gender === 1 ? "Male" : answers.gender === 2 ? "Female" : null;
   const parts = [
     answers.participantId ? `ID ${answers.participantId}` : null,
-    typeof answers.age === "number" ? `${answers.age} years` : null,
+    typeof answers.age === "number" ? `${answers.age} y` : null,
     gender,
   ].filter(Boolean);
   if (!parts.length) return null;
   return (
-    <p className="mt-2 inline-flex rounded-full bg-slate-200/70 px-3 py-1 text-sm font-medium text-slate-700">
-      Participant: {parts.join(" · ")}
+    <p className="mb-4 inline-flex max-w-full rounded-full bg-slate-200/80 px-3.5 py-1.5 text-[16px] font-semibold text-slate-700">
+      <span className="truncate">{parts.join(" · ")}</span>
     </p>
   );
 }
@@ -635,8 +600,8 @@ function Banner({ tone, children }: { tone: "info" | "warn" | "danger"; children
   }[tone];
   const Icon = tone === "info" ? InfoIcon : tone === "warn" ? ClockIcon : AlertIcon;
   return (
-    <div className={`mt-4 flex items-start gap-3 rounded-xl border p-3 text-[15px] ${styles}`} role="status">
-      <Icon className="mt-0.5 h-5 w-5 shrink-0" />
+    <div className={`mt-4 flex items-start gap-3 rounded-2xl border-2 p-4 text-[17px] ${styles}`} role="status">
+      <Icon className="mt-0.5 h-6 w-6 shrink-0" />
       <div className="flex min-w-0 flex-1 flex-col">{children}</div>
     </div>
   );
@@ -659,28 +624,28 @@ function DoneScreen({
 
   const view = {
     uploading: {
-      icon: <UploadIcon className="h-10 w-10 animate-pulse" />,
+      icon: <UploadIcon className="h-12 w-12 animate-pulse" />,
       ring: "bg-teal-100 text-teal-800",
       title: "Saved – uploading…",
       bn: "সংরক্ষিত হয়েছে – আপলোড হচ্ছে…",
       text: "The form is safely stored on this device and is being sent to the server.",
     },
     uploaded: {
-      icon: <CheckIcon className="h-10 w-10" strokeWidth={3} />,
+      icon: <CheckIcon className="h-12 w-12" strokeWidth={3} />,
       ring: "bg-emerald-100 text-emerald-700",
       title: "Submitted",
       bn: "সফলভাবে জমা হয়েছে",
       text: "The form has been uploaded to the server.",
     },
     queued: {
-      icon: <ClockIcon className="h-10 w-10" />,
+      icon: <ClockIcon className="h-12 w-12" />,
       ring: "bg-amber-100 text-amber-700",
       title: "Saved on this device",
       bn: "এই ডিভাইসে সংরক্ষিত হয়েছে",
       text: "No internet right now. It will upload automatically when the connection is back – you can keep collecting forms.",
     },
     rejected: {
-      icon: <AlertIcon className="h-10 w-10" />,
+      icon: <AlertIcon className="h-12 w-12" />,
       ring: "bg-red-100 text-red-700",
       title: "Saved, but not accepted",
       bn: "সংরক্ষিত, কিন্তু গ্রহণ করা হয়নি",
@@ -690,29 +655,34 @@ function DoneScreen({
 
   return (
     <div className="flex flex-col items-center py-10 text-center" aria-live="polite">
-      <span className={`flex h-20 w-20 items-center justify-center rounded-full ${view.ring}`}>{view.icon}</span>
-      <h1 ref={headingRef} tabIndex={-1} className="mt-5 text-2xl font-bold text-slate-900 outline-none">
+      <span className={`flex h-24 w-24 items-center justify-center rounded-full ${view.ring}`}>{view.icon}</span>
+      <h1 ref={headingRef} tabIndex={-1} className="mt-6 text-[30px] leading-tight font-bold text-slate-900 outline-none">
         {view.title}
-        <Bn className="mt-1 block text-lg font-semibold text-slate-600">{view.bn}</Bn>
+        <Bn className="mt-1 block text-[24px] font-semibold text-slate-700">{view.bn}</Bn>
       </h1>
-      <p className="mt-3 max-w-md text-[16px] text-slate-700">{view.text}</p>
-      <dl className="mt-6 w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 text-left">
+      <p className="mt-4 max-w-md text-[19px] text-slate-700">{view.text}</p>
+      <dl className="mt-6 w-full rounded-2xl border-2 border-slate-200 bg-white p-5 text-left text-[19px]">
         <div className="flex justify-between gap-4">
           <dt className="text-slate-600">Participant ID</dt>
-          <dd className="font-semibold text-slate-900">{done.participantId}</dd>
+          <dd className="font-bold break-all text-slate-900">{done.participantId}</dd>
         </div>
         <div className="mt-2 flex justify-between gap-4">
           <dt className="text-slate-600">Consent</dt>
-          <dd className="font-semibold text-slate-900">{done.consent ? "Yes" : "No"}</dd>
+          <dd className="font-bold text-slate-900">{done.consent ? "Yes" : "No"}</dd>
         </div>
       </dl>
-      <button type="button" onClick={onNext} className="btn-primary mt-8 h-14 w-full max-w-sm text-lg">
+      <button type="button" onClick={onNext} className="btn-primary mt-8 h-16 w-full rounded-2xl text-[21px]">
         Start next participant · <Bn>নতুন ফর্ম</Bn>
-        <ArrowRight className="h-5 w-5" />
+        <ArrowRight className="h-7 w-7" />
       </button>
       {state === "queued" && (
-        <button type="button" onClick={() => void sync.flush()} className="btn-secondary mt-3 w-full max-w-sm" disabled={sync.syncing}>
-          <UploadIcon className="h-5 w-5" /> {sync.syncing ? "Trying…" : "Try uploading now"}
+        <button
+          type="button"
+          onClick={() => void sync.flush()}
+          className="btn-secondary mt-3 h-16 w-full rounded-2xl text-[19px]"
+          disabled={sync.syncing}
+        >
+          <UploadIcon className="h-6 w-6" /> {sync.syncing ? "Trying…" : "Try uploading now"}
         </button>
       )}
     </div>

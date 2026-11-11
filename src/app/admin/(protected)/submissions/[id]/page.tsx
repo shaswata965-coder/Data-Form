@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
-import { STEPS, isVisible } from "@/lib/form-schema";
+import { SECTIONS, isVisible } from "@/lib/form-schema";
 import { displayAnswer, questionTitle } from "@/lib/format";
 import { getAdmin } from "@/lib/server/auth";
 import { duplicateIds, formatDateTime, getSubmission } from "@/lib/server/admin-data";
@@ -59,7 +59,7 @@ async function Detail({ params }: { params: Promise<{ id: string }> }) {
           Consent was not given. Only the Participant ID was recorded.
         </p>
       ) : (
-        STEPS.filter((s) => s.questions.length && s.id !== "consent").map((step) => (
+        SECTIONS.map((step) => (
           <section key={step.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
             <div className="border-b border-slate-100 bg-slate-50 px-4 py-2.5">
               <p className="text-xs font-semibold tracking-wide text-teal-800 uppercase">{step.part}</p>

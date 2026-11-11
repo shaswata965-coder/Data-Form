@@ -3,24 +3,36 @@ import { readJSON, removeKey, writeJSON } from "./storage";
 
 /** The form being filled right now, autosaved on every change. */
 export interface Draft {
-  v: 1;
+  v: 2;
   clientId: string;
   answers: Answers;
-  stepIndex: number;
+  /** Screen currently shown: "consent", a question id, or "review". */
+  screenId: string;
+  /** The collector has reached the review screen at least once. */
+  reviewed: boolean;
   startedAt: string;
   updatedAt: string;
-  /** Steps the collector has already moved past (for the progress bar). */
-  maxStep: number;
 }
 
 const KEY = "ohsi:draft:v1";
 
 export function loadDraft(): Draft | null {
-  const d = readJSON<Draft>(KEY);
-  if (!d || d.v !== 1 || typeof d.clientId !== "string" || typeof d.answers !== "object") {
-    return null;
+  const d = readJSON<Record<string, unknown>>(KEY);
+  if (!d || typeof d.clientId !== "string" || !d.answers || typeof d.answers !== "object") return null;
+  if (d.v === 2 && typeof d.screenId === "string") return d as unknown as Draft;
+  if (d.v === 1) {
+    // Drafts saved by the earlier multi-question layout: keep the answers, restart at the first screen.
+    return {
+      v: 2,
+      clientId: d.clientId,
+      answers: d.answers as Answers,
+      screenId: "consent",
+      reviewed: false,
+      startedAt: typeof d.startedAt === "string" ? d.startedAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
   }
-  return d;
+  return null;
 }
 
 export function saveDraft(d: Draft): boolean {

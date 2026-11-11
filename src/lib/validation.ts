@@ -7,7 +7,6 @@ import {
   type Answers,
   type Bilingual,
   type Question,
-  type Step,
 } from "./form-schema";
 
 /** Errors keyed by question id. */
@@ -116,17 +115,6 @@ function toConsentValue(c: unknown): number | undefined {
   if (c === true) return 1;
   if (c === false) return 0;
   return undefined;
-}
-
-/** Validates every visible question of one wizard step. */
-export function validateStep(step: Step, a: Answers): FieldErrors {
-  const errors: FieldErrors = {};
-  for (const q of step.questions) {
-    if (!isVisible(q, a)) continue;
-    const err = checkQuestion(q, a);
-    if (err) errors[q.id] = err;
-  }
-  return errors;
 }
 
 export type CleanResult =
